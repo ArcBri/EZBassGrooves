@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Capacitor / iOS build artifacts (keep project, ignore caches)
+ios/App/Pods/
+ios/App/App/public/
+ios/DerivedData/
+ios/.build/
+*.xcuserstate

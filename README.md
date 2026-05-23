@@ -27,3 +27,48 @@ npm run preview
 - **Root note** — set per bar in edit mode (top right)
 
 Data is stored in `localStorage` under `ezbassgrooves.v1` (legacy `groovemaker.v1` data is migrated automatically on first load).
+
+## iOS app (Capacitor)
+
+The web app is wrapped as a native iOS shell via [Capacitor](https://capacitorjs.com/).
+
+- **Bundle ID:** `com.arcb.ezbassgrooves`
+- **App name:** EZBassGrooves
+
+### Develop on Windows
+
+After changing the React app:
+
+```bash
+npm run ios:sync
+```
+
+This builds `dist/` and copies it into the Xcode project. Commit and push; GitHub Actions builds an unsigned `.ipa` on every push to `main`.
+
+### Download a build from CI
+
+1. Open the repo on GitHub → **Actions** → **iOS Build (unsigned)**.
+2. Open the latest successful run → download **EZBassGrooves-unsigned-ipa**.
+
+Unsigned builds cannot be installed on a physical iPhone. They confirm the pipeline works.
+
+### Install on a real device (TestFlight / App Store)
+
+You need:
+
+1. [Apple Developer Program](https://developer.apple.com/programs/) ($99/year).
+2. An App ID matching `com.arcb.ezbassgrooves`.
+3. A distribution certificate and provisioning profile.
+4. GitHub repository secrets for signing, for example:
+   - `APPLE_CERT_P12_BASE64`
+   - `APPLE_CERT_PASSWORD`
+   - `APPLE_PROVISION_PROFILE_BASE64`
+   - App Store Connect API key fields for upload
+
+Then extend the workflow with `apple-actions/import-codesign-certs`, `xcodebuild -exportArchive`, and `apple-actions/upload-testflight-build`.
+
+### Open in Xcode (Mac only)
+
+```bash
+npm run ios:open
+```
