@@ -1,4 +1,5 @@
-import type { Bar, Duration, Slot, StringIndex } from '../types'
+import type { Bar, Duration, Groove, Slot, StringIndex, TimeSignature } from '../types'
+import { DEFAULT_BPM } from '../types'
 import { DURATION_BEATS, STRING_LABELS } from '../types'
 
 export type SlotLayout = {
@@ -30,8 +31,24 @@ export function barTotalBeats(bar: Bar): number {
   return bar.timeSignature.num * (4 / bar.timeSignature.den)
 }
 
+export function timeSignatureTotalBeats(ts: TimeSignature): number {
+  return ts.num * (4 / ts.den)
+}
+
 export function slotsUsedBeats(slots: Slot[]): number {
   return slots.reduce((sum, s) => sum + durationToBeats(s.duration), 0)
+}
+
+export function trimSlotsToFit(slots: Slot[], targetBeats: number): Slot[] {
+  let used = 0
+  const out: Slot[] = []
+  for (const slot of slots) {
+    const beats = durationToBeats(slot.duration)
+    if (used + beats > targetBeats + 1e-9) break
+    out.push(slot)
+    used += beats
+  }
+  return out
 }
 
 export function remainingBeats(bar: Bar, slots: Slot[] = bar.slots): number {
@@ -58,10 +75,11 @@ export function layoutBar(
   bar: Bar,
   totalWidth: number,
   staffTop = 28,
+  leftReserve = 0,
 ): BarLayout {
-  const innerWidth = totalWidth - PADDING_X * 2
+  const innerWidth = totalWidth - PADDING_X * 2 - leftReserve
   const totalBeats = barTotalBeats(bar)
-  let x = PADDING_X
+  let x = PADDING_X + leftReserve
 
   const slots: SlotLayout[] = bar.slots.map((slot, slotIndex) => {
     const beats = durationToBeats(slot.duration)
@@ -135,10 +153,47 @@ export function beamGroups(slots: Slot[]): number[][] {
   return groups
 }
 
-export function createEmptyBar(): Bar {
+export function effectiveBpm(groove: Groove, barIndex: number): number {
+  const bar = groove.bars[barIndex]
+  if (!bar) return groove.bpm ?? DEFAULT_BPM
+  return bar.bpmOverride ?? groove.bpm ?? DEFAULT_BPM
+}
+
+export function effectiveTimeSignature(groove: Groove, barIndex: number): TimeSignature {
+  return groove.bars[barIndex]?.timeSignature ?? groove.defaultTimeSignature ?? { num: 4, den: 4 }
+}
+
+export function barDurationSeconds(bar: Bar, bpm: number): number {
+  return barTotalBeats(bar) * (60 / bpm)
+}
+
+export function normalizeTags(tags: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of tags) {
+    const t = raw.trim().toLowerCase()
+    if (t && !seen.has(t)) {
+      seen.add(t)
+      out.push(t)
+    }
+  }
+  return out.sort()
+}
+
+export function createEmptyBar(timeSignature: TimeSignature = { num: 4, den: 4 }): Bar {
   return {
     id: crypto.randomUUID(),
-    timeSignature: { num: 4, den: 4 },
+    timeSignature,
     slots: [],
   }
+}
+
+export function cloneBarWithNewIds(bar: Bar): Bar {
+  const cloned = structuredClone(bar)
+  cloned.id = crypto.randomUUID()
+  cloned.slots = cloned.slots.map((slot) => ({
+    ...slot,
+    id: crypto.randomUUID(),
+  }))
+  return cloned
 }

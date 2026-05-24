@@ -1,8 +1,18 @@
 import type { MouseEvent } from 'react'
-import type { Bar, StringIndex } from '../types'
-import { DURATION_LABELS, STRING_LABELS } from '../types'
+import type { Bar, Duration, StringIndex } from '../types'
+import { DURATION_LABELS, STRING_LABELS, isDotted } from '../types'
 import { beamGroups, layoutBar } from '../lib/notation'
 import { noteLabel, type NoteDisplayMode } from '../lib/scale'
+
+const REST_BASE_GLYPH: Record<Duration, string> = {
+  w: '𝄻',
+  'h.': '𝄼',
+  h: '𝄼',
+  'q.': '𝄽',
+  q: '𝄽',
+  '8': '𝄾',
+  '16': '𝄿',
+}
 
 type BarEditorProps = {
   bar: Bar
@@ -17,7 +27,13 @@ type BarEditorProps = {
   showRoot?: boolean
   compact?: boolean
   noteDisplayMode?: NoteDisplayMode
+  highlightSlotIndex?: number | null
+  bpm?: number
+  showTimeSignature?: boolean
+  showBpm?: boolean
 }
+
+const TIME_SIG_RESERVE = 26
 
 export function BarEditor({
   bar,
@@ -32,12 +48,19 @@ export function BarEditor({
   showRoot = true,
   compact = false,
   noteDisplayMode = 'fret',
+  highlightSlotIndex = null,
+  bpm,
+  showTimeSignature = false,
+  showBpm = false,
 }: BarEditorProps) {
   const staffTop = compact ? 8 : 28
-  const layout = layoutBar(bar, width, staffTop)
+  const leftReserve = showTimeSignature && !compact ? TIME_SIG_RESERVE : 0
+  const layout = layoutBar(bar, width, staffTop, leftReserve)
   const groups = beamGroups(bar.slots)
 
   const noteFont = compact ? 10 : 16
+  const timeSigX = 20 + TIME_SIG_RESERVE / 2 - 4
+  const timeSigMid = (layout.staffTop + layout.staffBottom) / 2
 
   return (
     <svg
@@ -59,16 +82,51 @@ export function BarEditor({
         </text>
       )}
 
+      {showBpm && bpm != null && !compact && (
+        <text
+          x={width - 8}
+          y={14}
+          textAnchor="end"
+          className="fill-slate-700 font-semibold"
+          fontSize={12}
+        >
+          ♩ = {bpm}
+        </text>
+      )}
+
       {showRoot && bar.rootNote && !compact && (
         <text
           x={width - 8}
-          y={16}
+          y={showBpm && bpm != null ? 25 : 16}
           textAnchor="end"
           className="fill-slate-500 font-medium"
           fontSize={11}
         >
           {bar.rootNote}
         </text>
+      )}
+
+      {showTimeSignature && !compact && (
+        <g className="pointer-events-none">
+          <text
+            x={timeSigX}
+            y={timeSigMid - 2}
+            textAnchor="middle"
+            className="fill-slate-900 font-bold"
+            fontSize={18}
+          >
+            {bar.timeSignature.num}
+          </text>
+          <text
+            x={timeSigX}
+            y={timeSigMid + 16}
+            textAnchor="middle"
+            className="fill-slate-900 font-bold"
+            fontSize={18}
+          >
+            {bar.timeSignature.den}
+          </text>
+        </g>
       )}
 
       {/* Bar lines */}
@@ -116,10 +174,24 @@ export function BarEditor({
       {/* Slots */}
       {layout.slots.map(({ slot, slotIndex, x, width: w, centerX }) => {
         const isSelected = selectedSlotIndex === slotIndex
+        const isHighlight = highlightSlotIndex === slotIndex
         const isRest = slot.notes.length === 0
 
         return (
           <g key={slot.id}>
+            {isHighlight && mode === 'view' && (
+              <rect
+                x={x}
+                y={layout.staffTop - 10}
+                width={w}
+                height={layout.staffBottom - layout.staffTop + 20}
+                fill="rgba(245, 158, 11, 0.25)"
+                stroke="#f59e0b"
+                strokeWidth={2}
+                rx={2}
+                pointerEvents="none"
+              />
+            )}
             {mode === 'edit' && (
               <rect
                 x={x}
@@ -161,7 +233,9 @@ export function BarEditor({
                         x={centerX}
                         y={lineY + 5}
                         textAnchor="middle"
-                        className="fill-slate-900 font-semibold pointer-events-none"
+                        className={`font-semibold pointer-events-none ${
+                          isHighlight ? 'fill-amber-700' : 'fill-slate-900'
+                        }`}
                         fontSize={noteFont}
                       >
                         {noteLabel(noteDisplayMode, note.string, note.fret, bar.rootNote)}
@@ -178,7 +252,7 @@ export function BarEditor({
                   x={centerX}
                   y={layout.lineYs[note.string]! + 5}
                   textAnchor="middle"
-                  className="fill-slate-900 font-semibold"
+                  className={`font-semibold ${isHighlight ? 'fill-amber-700' : 'fill-slate-900'}`}
                   fontSize={noteFont}
                 >
                   {noteLabel(noteDisplayMode, note.string, note.fret, bar.rootNote)}
@@ -186,15 +260,25 @@ export function BarEditor({
               ))}
 
             {mode === 'view' && isRest && (
-              <text
-                x={centerX}
-                y={layout.lineYs[1]! + 4}
-                textAnchor="middle"
-                className="fill-slate-500"
-                fontSize={compact ? 12 : 18}
-              >
-                𝄽
-              </text>
+              <g className="pointer-events-none">
+                <text
+                  x={centerX}
+                  y={layout.lineYs[1]! + 4}
+                  textAnchor="middle"
+                  className="fill-slate-500"
+                  fontSize={compact ? 12 : 18}
+                >
+                  {REST_BASE_GLYPH[slot.duration]}
+                </text>
+                {isDotted(slot.duration) && (
+                  <circle
+                    cx={centerX + (compact ? 8 : 12)}
+                    cy={layout.lineYs[1]! + 2}
+                    r={compact ? 1.2 : 1.8}
+                    className="fill-slate-500"
+                  />
+                )}
+              </g>
             )}
 
             {/* Rhythm stem */}
@@ -265,7 +349,7 @@ export function BarEditor({
             className="fill-slate-400 pointer-events-none"
             fontSize={9}
           >
-            {slot.duration === 'q' ? 'q' : slot.duration}
+            {slot.duration}
           </text>
         ))}
     </svg>
@@ -285,13 +369,14 @@ function RhythmStem({
   x: number
   y: number
   baseline: number
-  duration: 'q' | '8' | '16'
+  duration: Duration
   isRest: boolean
   compact?: boolean
   selected?: boolean
   onClick?: (e: MouseEvent) => void
 }) {
   const stroke = selected ? '#3b82f6' : '#334155'
+  const dotted = isDotted(duration)
 
   if (isRest) {
     return (
@@ -303,24 +388,51 @@ function RhythmStem({
           fontSize={compact ? 14 : 20}
           className="fill-slate-600"
         >
-          {duration === 'q' ? '𝄻' : duration === '8' ? '𝄾' : '𝄿'}
+          {REST_BASE_GLYPH[duration]}
         </text>
+        {dotted && (
+          <circle
+            cx={x + (compact ? 6 : 8)}
+            cy={baseline - 6}
+            r={compact ? 1.4 : 2}
+            className="fill-slate-600"
+          />
+        )}
       </g>
     )
   }
 
+  const hollow = duration === 'h' || duration === 'h.' || duration === 'w'
+  const hasStem = duration !== 'w'
+  const headRx = compact ? 3 : 4
+  const headRy = compact ? 2.5 : 3
+  const headCx = x - 4
+
   return (
     <g onClick={onClick} style={{ cursor: onClick ? 'pointer' : undefined }}>
-      <line x1={x} y1={y} x2={x} y2={baseline} stroke={stroke} strokeWidth={1.5} />
-      {duration === 'q' && (
-        <ellipse
-          cx={x - 4}
-          cy={baseline}
-          rx={compact ? 3 : 4}
-          ry={compact ? 2.5 : 3}
+      {hasStem && (
+        <line x1={x} y1={y} x2={x} y2={baseline} stroke={stroke} strokeWidth={1.5} />
+      )}
+
+      <ellipse
+        cx={headCx}
+        cy={baseline}
+        rx={headRx}
+        ry={headRy}
+        fill={hollow ? 'none' : '#334155'}
+        stroke="#334155"
+        strokeWidth={hollow ? 1.5 : 0}
+      />
+
+      {dotted && (
+        <circle
+          cx={headCx + headRx + 3}
+          cy={baseline - 1}
+          r={compact ? 1.2 : 1.6}
           fill="#334155"
         />
       )}
+
       {duration === '8' && (
         <path
           d={`M ${x} ${baseline} l 6 ${compact ? 5 : 8}`}

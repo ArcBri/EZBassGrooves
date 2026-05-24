@@ -1,4 +1,4 @@
-import type { Groove } from '../types'
+import type { Bar, Groove, PlaybackVolume } from '../types'
 import type { NoteDisplayMode } from './scale'
 
 const STORAGE_KEY = 'ezbassgrooves.v1'
@@ -8,6 +8,10 @@ export type PersistedState = {
   version: 1
   grooves: Groove[]
   noteDisplayMode?: NoteDisplayMode
+  playbackVolume?: PlaybackVolume
+  clipboardBars?: Bar[]
+  /** @deprecated kept for backward-compat with older stored state */
+  clipboardBar?: Bar | null
 }
 
 function readKey(key: string): PersistedState | null {
@@ -41,8 +45,16 @@ export function loadFromStorage(): PersistedState | null {
 export function saveToStorage(
   grooves: Groove[],
   noteDisplayMode: NoteDisplayMode = 'fret',
+  playbackVolume?: PlaybackVolume,
+  clipboardBars?: Bar[] | null,
 ): void {
-  const state: PersistedState = { version: 1, grooves, noteDisplayMode }
+  const state: PersistedState = {
+    version: 1,
+    grooves,
+    noteDisplayMode,
+    ...(playbackVolume ? { playbackVolume } : {}),
+    ...(clipboardBars && clipboardBars.length > 0 ? { clipboardBars } : {}),
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
 }
 

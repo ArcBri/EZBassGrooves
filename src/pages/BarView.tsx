@@ -1,19 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { BarActionsSheet } from '../components/BarActionsSheet'
 import { BarEditor } from '../components/BarEditor'
+import { BpmPicker } from '../components/BpmPicker'
 import { DisplayModeToggle, ViewModeChip } from '../components/DisplayModeToggle'
 import { FretKeypad } from '../components/FretKeypad'
 import { RootNotePicker } from '../components/RootNotePicker'
 import { ScaleKeypad } from '../components/ScaleKeypad'
-import { hasAnyNotes, transposeBar } from '../lib/scale'
+import { TimeSignaturePicker } from '../components/TimeSignaturePicker'
+import { VolumeControls } from '../components/VolumeControls'
+import { usePlayhead } from '../hooks/usePlayhead'
 import { createId } from '../lib/ids'
+import type { PlayBar } from '../lib/metronome'
 import {
   canAppendDuration,
   canChangeSlotDuration,
+  effectiveBpm,
   remainingBeats,
+  slotsUsedBeats,
+  timeSignatureTotalBeats,
+  trimSlotsToFit,
 } from '../lib/notation'
+import { hasAnyNotes, transposeBar } from '../lib/scale'
 import { useGroovesStore } from '../state/groovesStore'
-import type { Bar, Duration, Slot, StringIndex } from '../types'
-import { DURATION_LABELS } from '../types'
+import type { Bar, Duration, Slot, StringIndex, TimeSignature } from '../types'
+import { DEFAULT_BPM, DURATION_LABELS, DURATION_ORDER } from '../types'
 
 type BarViewProps = {
   grooveId: string
@@ -24,16 +34,44 @@ type BarViewProps = {
 
 type CellTarget = { slotIndex: number; string: StringIndex }
 
+function formatTimeSignature(ts: TimeSignature): string {
+  return `${ts.num}/${ts.den}`
+}
+
+function timeSignaturesEqual(a: TimeSignature, b: TimeSignature): boolean {
+  return a.num === b.num && a.den === b.den
+}
+
 export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewProps) {
   const groove = useGroovesStore((s) => s.getGroove(grooveId))
   const commitBar = useGroovesStore((s) => s.commitBar)
   const addBar = useGroovesStore((s) => s.addBar)
   const noteDisplayMode = useGroovesStore((s) => s.noteDisplayMode)
   const setNoteDisplayMode = useGroovesStore((s) => s.setNoteDisplayMode)
+  const setBpm = useGroovesStore((s) => s.setBpm)
+  const setBarBpmOverride = useGroovesStore((s) => s.setBarBpmOverride)
+  const setGrooveTimeSignature = useGroovesStore((s) => s.setGrooveTimeSignature)
+  const setBarTimeSignature = useGroovesStore((s) => s.setBarTimeSignature)
+  const playbackVolume = useGroovesStore((s) => s.playbackVolume)
+  const setPlaybackVolume = useGroovesStore((s) => s.setPlaybackVolume)
+  const clipboardBars = useGroovesStore((s) => s.clipboardBars)
+  const copyBarsToClipboard = useGroovesStore((s) => s.copyBarsToClipboard)
+  const clearClipboard = useGroovesStore((s) => s.clearClipboard)
+  const duplicateBarsAt = useGroovesStore((s) => s.duplicateBarsAt)
+  const insertBarsAfter = useGroovesStore((s) => s.insertBarsAfter)
+  const replaceBarsWith = useGroovesStore((s) => s.replaceBarsWith)
+  const deleteBarsAt = useGroovesStore((s) => s.deleteBarsAt)
 
   const savedBar = groove?.bars[barIndex]
 
+  const { isPlaying, current, play, stop } = usePlayhead()
+
   const [isEditing, setIsEditing] = useState(false)
+  const [showBpmPicker, setShowBpmPicker] = useState(false)
+  const [showTimeSignaturePicker, setShowTimeSignaturePicker] = useState(false)
+  const [showVolumeControls, setShowVolumeControls] = useState(false)
+  const [showBarActions, setShowBarActions] = useState(false)
+  const [restMode, setRestMode] = useState(false)
   const [draft, setDraft] = useState<Bar | null>(null)
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null)
   const [cellTarget, setCellTarget] = useState<CellTarget | null>(null)
@@ -42,6 +80,28 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
   const containerRef = useRef<HTMLDivElement>(null)
 
   const displayBar = isEditing && draft ? draft : savedBar
+
+  const grooveBpm = groove?.bpm ?? DEFAULT_BPM
+  const effectiveBarBpm = groove
+    ? isEditing && draft
+      ? draft.bpmOverride ?? groove.bpm ?? DEFAULT_BPM
+      : effectiveBpm(groove, barIndex)
+    : DEFAULT_BPM
+  const hasOverride =
+    isEditing && draft
+      ? draft.bpmOverride != null
+      : savedBar?.bpmOverride != null
+  const grooveTimeSignature = groove?.defaultTimeSignature ?? { num: 4, den: 4 }
+  const displayTimeSignature = displayBar?.timeSignature ?? grooveTimeSignature
+  const hasTimeSignatureOverride = !timeSignaturesEqual(displayTimeSignature, grooveTimeSignature)
+
+  useEffect(() => {
+    return () => stop()
+  }, [stop])
+
+  useEffect(() => {
+    stop()
+  }, [barIndex, stop])
 
   useEffect(() => {
     const el = containerRef.current
@@ -172,6 +232,62 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
     [updateDraft],
   )
 
+  const clearAllSlots = useCallback(() => {
+    if (!draft) return
+    if (draft.slots.length === 0) return
+    if (!confirm('Remove all notes from this bar?')) return
+    updateDraft((bar) => ({ ...bar, slots: [] }))
+    setSelectedSlotIndex(null)
+    setCellTarget(null)
+  }, [draft, updateDraft])
+
+  const handleDuplicateBar = useCallback(() => {
+    stop()
+    const newIndex = duplicateBarsAt(grooveId, barIndex, barIndex)
+    if (newIndex != null) onNavigateBar(newIndex)
+  }, [duplicateBarsAt, grooveId, barIndex, onNavigateBar, stop])
+
+  const handleCopyBar = useCallback(() => {
+    copyBarsToClipboard(grooveId, barIndex, barIndex)
+  }, [copyBarsToClipboard, grooveId, barIndex])
+
+  const handlePasteInsertAfter = useCallback(() => {
+    if (clipboardBars.length === 0) return
+    stop()
+    const newIndex = insertBarsAfter(grooveId, barIndex, clipboardBars)
+    if (newIndex != null) onNavigateBar(newIndex)
+  }, [clipboardBars, insertBarsAfter, grooveId, barIndex, onNavigateBar, stop])
+
+  const handlePasteReplace = useCallback(() => {
+    if (clipboardBars.length === 0) return
+    const msg =
+      clipboardBars.length === 1
+        ? `Replace bar ${barIndex + 1} with the clipboard contents?`
+        : `Replace bar ${barIndex + 1} with ${clipboardBars.length} bars from the clipboard?`
+    if (!confirm(msg)) return
+    stop()
+    replaceBarsWith(grooveId, barIndex, barIndex, clipboardBars)
+  }, [clipboardBars, replaceBarsWith, grooveId, barIndex, stop])
+
+  const canDeleteCurrentBar = (groove?.bars.length ?? 0) > 1
+  const handleDeleteBar = useCallback(() => {
+    if (!groove) return
+    if (groove.bars.length <= 1) {
+      alert('Cannot delete the last bar. A groove must have at least one bar.')
+      return
+    }
+    if (!confirm(`Delete bar ${barIndex + 1}?`)) return
+    stop()
+    if (isEditing) {
+      setIsEditing(false)
+      setDraft(null)
+      setSelectedSlotIndex(null)
+      setCellTarget(null)
+    }
+    const newIndex = deleteBarsAt(grooveId, barIndex, barIndex)
+    if (newIndex != null) onNavigateBar(newIndex)
+  }, [groove, barIndex, stop, isEditing, deleteBarsAt, grooveId, onNavigateBar])
+
   const toggleTie = useCallback(
     (slotIndex: number) => {
       updateDraft((bar) => ({
@@ -182,6 +298,55 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
       }))
     },
     [updateDraft],
+  )
+
+  const applyTimeSignatureToBar = useCallback((bar: Bar, timeSignature: TimeSignature): Bar | null => {
+    const maxBeats = timeSignatureTotalBeats(timeSignature)
+    if (slotsUsedBeats(bar.slots) <= maxBeats + 1e-9) {
+      return { ...bar, timeSignature }
+    }
+    if (!confirm('This time signature is shorter than the current bar. Trim slots from the end?')) {
+      return null
+    }
+    return {
+      ...bar,
+      timeSignature,
+      slots: trimSlotsToFit(bar.slots, maxBeats),
+    }
+  }, [])
+
+  const handleSaveTimeSignature = useCallback(
+    (timeSignature: TimeSignature, override: boolean) => {
+      if (isEditing && draft) {
+        const nextBar = applyTimeSignatureToBar(draft, timeSignature)
+        if (!nextBar) return
+        setDraft(nextBar)
+        setSelectedSlotIndex(null)
+        if (!override) setGrooveTimeSignature(grooveId, timeSignature)
+      } else if (savedBar) {
+        const nextBar = applyTimeSignatureToBar(savedBar, timeSignature)
+        if (!nextBar) return
+        if (!override) setGrooveTimeSignature(grooveId, timeSignature)
+        setBarTimeSignature(grooveId, barIndex, nextBar.timeSignature)
+        if (nextBar.slots.length !== savedBar.slots.length) {
+          commitBar(grooveId, barIndex, nextBar)
+        }
+      }
+
+      setShowTimeSignaturePicker(false)
+    },
+    [
+      applyTimeSignatureToBar,
+      barIndex,
+      commitBar,
+      draft,
+      grooveId,
+      grooveTimeSignature,
+      isEditing,
+      savedBar,
+      setBarTimeSignature,
+      setGrooveTimeSignature,
+    ],
   )
 
   const remaining = useMemo(() => {
@@ -204,7 +369,21 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
   const canPrev = barIndex > 0
   const canNext = barIndex < totalBars - 1
 
+  const barPlayPlan = useMemo((): PlayBar[] => {
+    if (!groove || !displayBar) return []
+    return [
+      {
+        barIndex,
+        bpm: effectiveBarBpm,
+        bar: displayBar,
+      },
+    ]
+  }, [groove, displayBar, barIndex, effectiveBarBpm])
+
+  const bpmLabel = hasOverride ? `${effectiveBarBpm} (override)` : `${effectiveBarBpm}`
+
   const goPrev = () => {
+    stop()
     if (isEditing) {
       if (!confirm('Discard unsaved changes?')) return
       cancelEdit()
@@ -213,6 +392,7 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
   }
 
   const goNext = () => {
+    stop()
     if (isEditing) {
       if (!confirm('Discard unsaved changes?')) return
       cancelEdit()
@@ -242,18 +422,32 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
         <span className="flex-1 text-center text-sm font-semibold text-slate-800">
           Bar {barIndex + 1} / {totalBars}
         </span>
+        <button
+          type="button"
+          onClick={() => setShowBpmPicker(true)}
+          className="min-h-[40px] rounded-lg bg-slate-100 px-2 text-xs font-semibold text-slate-700 shrink-0 max-w-[100px] truncate"
+        >
+          {bpmLabel} ▾
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowTimeSignaturePicker(true)}
+          className="min-h-[40px] rounded-lg bg-slate-100 px-2 text-xs font-semibold text-slate-700 shrink-0"
+        >
+          {formatTimeSignature(displayTimeSignature)} ▾
+        </button>
         {isEditing ? (
           <button
             type="button"
             onClick={() => setShowRootPicker(true)}
-            className="min-h-[44px] rounded-lg bg-slate-100 px-3 text-sm font-medium text-slate-700"
+            className="min-h-[44px] rounded-lg bg-slate-100 px-2 text-sm font-medium text-slate-700 shrink-0"
           >
-            Root: {draft?.rootNote ?? '—'} ▾
+            {draft?.rootNote ?? 'Root'} ▾
           </button>
         ) : (
           <>
             {displayBar.rootNote && (
-              <span className="text-sm font-medium text-slate-600 mr-1">
+              <span className="text-sm font-medium text-slate-600 shrink-0 hidden sm:inline">
                 {displayBar.rootNote}
               </span>
             )}
@@ -334,53 +528,124 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
             }
             showBarNumber
             showRoot={!isEditing}
+            bpm={effectiveBarBpm}
+            showBpm
+            showTimeSignature
+            highlightSlotIndex={
+              !isEditing && current?.barIndex === barIndex ? current.slotIndex : null
+            }
           />
         </div>
       </div>
+
+      {!isEditing && (
+        <footer className="border-t border-slate-200 bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setShowBarActions(true)}
+              className="min-h-[36px] rounded-lg bg-slate-100 px-2.5 text-xs font-semibold text-slate-700"
+            >
+              Bar ▾
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowVolumeControls(true)}
+              aria-label="Playback volume"
+              className="min-h-[36px] rounded-lg bg-slate-100 px-2.5 text-xs font-semibold text-slate-700"
+            >
+              {playbackVolume.click === 0 && playbackVolume.synth === 0 ? 'Vol: muted' : 'Vol ▾'}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (isPlaying) stop()
+              else play(barPlayPlan, barIndex)
+            }}
+            disabled={!displayBar || displayBar.slots.length === 0}
+            className={`w-full min-h-[48px] rounded-xl text-sm font-semibold text-white disabled:opacity-40 ${
+              isPlaying ? 'bg-red-600' : 'bg-emerald-600'
+            }`}
+          >
+            {isPlaying ? '■ Stop' : '▶ Play bar'}
+          </button>
+        </footer>
+      )}
 
       {isEditing && draft && (
         <>
           <div className="border-t border-slate-200 bg-slate-50 px-4 py-3">
             <p className="mb-2 text-xs text-slate-500 text-center">
-              Tap a duration to append a slot · Remaining: {remaining} beat
+              Tap a duration to append a {restMode ? 'rest' : 'note'} · Remaining: {remaining} beat
               {remaining !== 1 ? 's' : ''}
               {selectedSlotIndex !== null && ` · Selected: ${selectedSlotIndex + 1}`}
             </p>
-            <div className="flex justify-center gap-2">
-              {(['q', '8', '16'] as Duration[]).map((d) => (
+
+            <div className="mb-2 flex justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRestMode(false)}
+                className={`min-h-[36px] rounded-lg px-3 text-xs font-semibold ${
+                  !restMode ? 'bg-slate-900 text-white' : 'bg-white border border-slate-300 text-slate-700'
+                }`}
+              >
+                Note
+              </button>
+              <button
+                type="button"
+                onClick={() => setRestMode(true)}
+                className={`min-h-[36px] rounded-lg px-3 text-xs font-semibold ${
+                  restMode ? 'bg-slate-900 text-white' : 'bg-white border border-slate-300 text-slate-700'
+                }`}
+              >
+                Rest
+              </button>
+            </div>
+
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {DURATION_ORDER.map((d) => (
                 <button
                   key={d}
                   type="button"
                   disabled={!canAppendDuration(draft, draft.slots, d)}
-                  onClick={() => appendSlot(d)}
-                  className="min-h-[48px] min-w-[64px] rounded-xl bg-white border border-slate-200 text-lg font-medium disabled:opacity-40 active:bg-slate-100"
+                  onClick={() => appendSlot(d, restMode)}
+                  className="min-h-[44px] min-w-[48px] rounded-xl bg-white border border-slate-200 text-sm font-medium disabled:opacity-40 active:bg-slate-100"
                 >
-                  {DURATION_LABELS[d]} {d === 'q' ? 'q' : d}
+                  <span className="block text-base leading-none">{DURATION_LABELS[d]}</span>
+                  <span className="block text-[10px] text-slate-500">{d}</span>
                 </button>
               ))}
               <button
                 type="button"
-                disabled={!canAppendDuration(draft, draft.slots, 'q')}
-                onClick={() => appendSlot('q', true)}
-                className="min-h-[48px] min-w-[64px] rounded-xl bg-white border border-slate-200 text-lg disabled:opacity-40 active:bg-slate-100"
+                disabled={draft.slots.length === 0}
+                onClick={clearAllSlots}
+                className="min-h-[44px] rounded-xl bg-red-50 border border-red-200 px-3 text-xs font-semibold text-red-700 disabled:opacity-40 active:bg-red-100"
               >
-                𝄽 rest
+                Clear all
               </button>
             </div>
 
             {selectedSlotIndex !== null && draft.slots[selectedSlotIndex] && (
-              <div className="mt-3 flex flex-wrap justify-center gap-2">
-                <span className="w-full text-center text-xs text-slate-500">Change slot:</span>
-                {(['q', '8', '16'] as Duration[]).map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => changeSlotDuration(selectedSlotIndex, d)}
-                    className="min-h-[40px] rounded-lg bg-white border px-3 text-sm"
-                  >
-                    {d}
-                  </button>
-                ))}
+              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+                <span className="w-full text-center text-xs text-slate-500">Change slot duration:</span>
+                {DURATION_ORDER.map((d) => {
+                  const allowed = canChangeSlotDuration(draft, draft.slots, selectedSlotIndex, d)
+                  const isCurrent = draft.slots[selectedSlotIndex]?.duration === d
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      disabled={!allowed}
+                      onClick={() => changeSlotDuration(selectedSlotIndex, d)}
+                      className={`min-h-[40px] rounded-lg border px-2.5 text-xs font-medium disabled:opacity-30 ${
+                        isCurrent ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700'
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  )
+                })}
                 <button
                   type="button"
                   onClick={() => toggleTie(selectedSlotIndex)}
@@ -397,7 +662,7 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
                   onClick={() => deleteSlot(selectedSlotIndex)}
                   className="min-h-[40px] rounded-lg bg-red-50 border border-red-200 px-3 text-sm text-red-700"
                 >
-                  Delete slot
+                  Delete
                 </button>
               </div>
             )}
@@ -453,6 +718,67 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
           value={draft.rootNote}
           onChange={handleRootChange}
           onClose={() => setShowRootPicker(false)}
+        />
+      )}
+
+      {showBpmPicker && groove && (
+        <BpmPicker
+          value={effectiveBarBpm}
+          grooveDefault={grooveBpm}
+          showOverrideToggle
+          overrideEnabled={hasOverride}
+          onClose={() => setShowBpmPicker(false)}
+          onSave={(bpm, override) => {
+            if (isEditing && draft) {
+              updateDraft((b) => ({
+                ...b,
+                bpmOverride: override ? bpm : undefined,
+              }))
+            } else {
+              if (override) {
+                setBarBpmOverride(grooveId, barIndex, bpm)
+              } else {
+                setBpm(grooveId, bpm)
+                setBarBpmOverride(grooveId, barIndex, undefined)
+              }
+            }
+            setShowBpmPicker(false)
+          }}
+        />
+      )}
+
+      {showTimeSignaturePicker && (
+        <TimeSignaturePicker
+          value={displayTimeSignature}
+          grooveDefault={grooveTimeSignature}
+          showOverrideToggle
+          overrideEnabled={hasTimeSignatureOverride}
+          onClose={() => setShowTimeSignaturePicker(false)}
+          onSave={handleSaveTimeSignature}
+        />
+      )}
+
+      {showVolumeControls && (
+        <VolumeControls
+          volume={playbackVolume}
+          onChange={setPlaybackVolume}
+          onClose={() => setShowVolumeControls(false)}
+        />
+      )}
+
+      {showBarActions && savedBar && (
+        <BarActionsSheet
+          barNumber={barIndex + 1}
+          clipboardBars={clipboardBars}
+          destinationBar={savedBar}
+          canDelete={canDeleteCurrentBar}
+          onDuplicate={handleDuplicateBar}
+          onCopy={handleCopyBar}
+          onPasteInsertAfter={handlePasteInsertAfter}
+          onPasteReplace={handlePasteReplace}
+          onDelete={handleDeleteBar}
+          onClearClipboard={clearClipboard}
+          onClose={() => setShowBarActions(false)}
         />
       )}
     </div>
