@@ -21,6 +21,7 @@ export function FretKeypad({ slotIndex, string, onSelect, onClear, onClose, hint
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-2" onClick={onClose}>
       <div
+        data-tutorial="bar-keypad"
         className="w-full max-w-md rounded-2xl bg-white p-3 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >

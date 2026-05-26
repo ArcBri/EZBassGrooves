@@ -12,7 +12,13 @@ type GroovesState = {
   playbackVolume: PlaybackVolume
   clipboardBars: Bar[]
   hydrated: boolean
+  dirtyGrooveIds: Record<string, true>
   hydrate: () => void
+  saveGroove: (grooveId: string) => void
+  saveAllGrooves: () => void
+  discardGrooveChanges: (grooveId: string) => void
+  isGrooveDirty: (grooveId: string) => boolean
+  hasUnsavedChanges: () => boolean
   setNoteDisplayMode: (mode: NoteDisplayMode) => void
   setPlaybackVolume: (volume: Partial<PlaybackVolume>) => void
   createGroove: (name?: string) => Groove
@@ -63,12 +69,55 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
     )
   }
 
+  const markDirty = (grooveId: string) => {
+    const current = get().dirtyGrooveIds
+    if (current[grooveId]) return
+    set({ dirtyGrooveIds: { ...current, [grooveId]: true } })
+  }
+
+  const clearDirty = (grooveId: string) => {
+    const current = get().dirtyGrooveIds
+    if (!current[grooveId]) return
+    const next = { ...current }
+    delete next[grooveId]
+    set({ dirtyGrooveIds: next })
+  }
+
+  // Persists settings/clipboard without overwriting on-disk grooves. Dirty
+  // grooves in memory stay unsaved until the user explicitly saves.
+  const persistSettingsOnly = () => {
+    const stored = loadFromStorage()
+    const persistedGrooves = stored?.grooves ?? []
+    saveToStorage(
+      persistedGrooves,
+      get().noteDisplayMode,
+      get().playbackVolume,
+      get().clipboardBars,
+    )
+  }
+
+  // Applies a mutation to the on-disk grooves list without touching unsaved
+  // in-memory edits. Used by list-level/intentional metadata actions (create,
+  // delete, rename, favorite, tags, import, duplicate).
+  const updateOnDisk = (mutator: (grooves: Groove[]) => Groove[]) => {
+    const stored = loadFromStorage()
+    const persistedGrooves = stored?.grooves ?? []
+    const updated = mutator(persistedGrooves)
+    saveToStorage(
+      updated,
+      get().noteDisplayMode,
+      get().playbackVolume,
+      get().clipboardBars,
+    )
+  }
+
   return {
     grooves: [],
     noteDisplayMode: 'fret',
     playbackVolume: DEFAULT_PLAYBACK_VOLUME,
     clipboardBars: [],
     hydrated: false,
+    dirtyGrooveIds: {},
 
     hydrate: () => {
       if (get().hydrated) return
@@ -88,12 +137,51 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           : DEFAULT_PLAYBACK_VOLUME,
         clipboardBars,
         hydrated: true,
+        dirtyGrooveIds: {},
       })
     },
 
+    saveGroove: (grooveId) => {
+      const inMemory = get().grooves.find((g) => g.id === grooveId)
+      if (!inMemory) return
+      updateOnDisk((g) => {
+        const idx = g.findIndex((x) => x.id === grooveId)
+        if (idx < 0) return [...g, inMemory]
+        const next = [...g]
+        next[idx] = inMemory
+        return next
+      })
+      clearDirty(grooveId)
+    },
+
+    saveAllGrooves: () => {
+      persist(get().grooves)
+      set({ dirtyGrooveIds: {} })
+    },
+
+    discardGrooveChanges: (grooveId) => {
+      const stored = loadFromStorage()
+      const persisted = stored?.grooves ?? []
+      const persistedGroove = persisted.find((g) => g.id === grooveId)
+      set((s) => {
+        let grooves: Groove[]
+        if (persistedGroove) {
+          grooves = s.grooves.map((g) => (g.id === grooveId ? persistedGroove : g))
+        } else {
+          grooves = s.grooves.filter((g) => g.id !== grooveId)
+        }
+        return { grooves }
+      })
+      clearDirty(grooveId)
+    },
+
+    isGrooveDirty: (grooveId) => Boolean(get().dirtyGrooveIds[grooveId]),
+
+    hasUnsavedChanges: () => Object.keys(get().dirtyGrooveIds).length > 0,
+
     setNoteDisplayMode: (mode) => {
       set({ noteDisplayMode: mode })
-      saveToStorage(get().grooves, mode, get().playbackVolume, get().clipboardBars)
+      persistSettingsOnly()
     },
 
     setPlaybackVolume: (volume) => {
@@ -102,7 +190,7 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
         synth: volume.synth != null ? clampVolume(volume.synth) : get().playbackVolume.synth,
       }
       set({ playbackVolume: next })
-      saveToStorage(get().grooves, get().noteDisplayMode, next, get().clipboardBars)
+      persistSettingsOnly()
     },
 
     createGroove: (name = 'New groove') => {
@@ -114,50 +202,54 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
         updatedAt: now,
         bars: [createEmptyBar()],
       }
-      set((s) => {
-        const grooves = [...s.grooves, groove]
-        persist(grooves)
-        return { grooves }
-      })
+      set((s) => ({ grooves: [...s.grooves, groove] }))
+      // Brand-new grooves are empty by definition. We do not persist them
+      // automatically — they live in memory as "Unsaved" until the user
+      // explicitly saves the groove. If the app reloads first, the empty
+      // groove is discarded.
+      markDirty(groove.id)
       return groove
     },
 
     renameGroove: (id, name) => {
-      set((s) => {
-        const grooves = withUpdated(s.grooves, id, (g) => ({
+      const now = Date.now()
+      set((s) => ({
+        grooves: withUpdated(s.grooves, id, (g) => ({
           ...g,
           name,
-          updatedAt: Date.now(),
-        }))
-        persist(grooves)
-        return { grooves }
-      })
+          updatedAt: now,
+        })),
+      }))
+      updateOnDisk((g) =>
+        g.map((x) => (x.id === id ? { ...x, name, updatedAt: now } : x)),
+      )
     },
 
     deleteGroove: (id) => {
-      set((s) => {
-        const grooves = s.grooves.filter((g) => g.id !== id)
-        persist(grooves)
-        return { grooves }
-      })
+      set((s) => ({ grooves: s.grooves.filter((g) => g.id !== id) }))
+      updateOnDisk((g) => g.filter((x) => x.id !== id))
+      clearDirty(id)
     },
 
     duplicateGroove: (id) => {
       const source = get().grooves.find((g) => g.id === id)
       if (!source) return null
       const now = Date.now()
+      // If the source is dirty, the copy should mirror what's on disk to keep
+      // the duplicate consistent with the saved state. Fall back to the
+      // in-memory copy if the source isn't persisted yet.
+      const stored = loadFromStorage()
+      const persistedSource =
+        stored?.grooves.find((g) => g.id === id) ?? source
       const copy: Groove = {
-        ...structuredClone(source),
+        ...structuredClone(persistedSource),
         id: createId(),
-        name: `${source.name} (copy)`,
+        name: `${persistedSource.name} (copy)`,
         createdAt: now,
         updatedAt: now,
       }
-      set((s) => {
-        const grooves = [...s.grooves, copy]
-        persist(grooves)
-        return { grooves }
-      })
+      set((s) => ({ grooves: [...s.grooves, copy] }))
+      updateOnDisk((g) => [...g, copy])
       return copy
     },
 
@@ -169,11 +261,8 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
         updatedAt: now,
         createdAt: groove.createdAt ?? now,
       }
-      set((s) => {
-        const grooves = [...s.grooves, imported]
-        persist(grooves)
-        return { grooves }
-      })
+      set((s) => ({ grooves: [...s.grooves, imported] }))
+      updateOnDisk((g) => [...g, imported])
     },
 
     getGroove: (id) => get().grooves.find((g) => g.id === id),
@@ -185,9 +274,9 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           bars: [...g.bars, createEmptyBar(g.defaultTimeSignature)],
           updatedAt: Date.now(),
         }))
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
     },
 
     commitBar: (grooveId, barIndex, bar) => {
@@ -197,9 +286,9 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           bars[barIndex] = bar
           return { ...g, bars, updatedAt: Date.now() }
         })
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
     },
 
     touchGroove: (grooveId) => {
@@ -208,34 +297,46 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           ...g,
           updatedAt: Date.now(),
         }))
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
     },
 
     toggleFavorite: (grooveId) => {
+      const now = Date.now()
+      let newFavorite = false
       set((s) => {
-        const grooves = withUpdated(s.grooves, grooveId, (g) => ({
-          ...g,
-          favorite: !g.favorite,
-          updatedAt: Date.now(),
-        }))
-        persist(grooves)
+        const grooves = withUpdated(s.grooves, grooveId, (g) => {
+          newFavorite = !g.favorite
+          return { ...g, favorite: newFavorite, updatedAt: now }
+        })
         return { grooves }
       })
+      updateOnDisk((g) =>
+        g.map((x) =>
+          x.id === grooveId ? { ...x, favorite: newFavorite, updatedAt: now } : x,
+        ),
+      )
     },
 
     setTags: (grooveId, tags) => {
       const normalized = normalizeTags(tags)
-      set((s) => {
-        const grooves = withUpdated(s.grooves, grooveId, (g) => ({
+      const tagsOrUndefined = normalized.length > 0 ? normalized : undefined
+      const now = Date.now()
+      set((s) => ({
+        grooves: withUpdated(s.grooves, grooveId, (g) => ({
           ...g,
-          tags: normalized.length > 0 ? normalized : undefined,
-          updatedAt: Date.now(),
-        }))
-        persist(grooves)
-        return { grooves }
-      })
+          tags: tagsOrUndefined,
+          updatedAt: now,
+        })),
+      }))
+      updateOnDisk((g) =>
+        g.map((x) =>
+          x.id === grooveId
+            ? { ...x, tags: tagsOrUndefined, updatedAt: now }
+            : x,
+        ),
+      )
     },
 
     setBpm: (grooveId, bpm) => {
@@ -245,9 +346,9 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           bpm,
           updatedAt: Date.now(),
         }))
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
     },
 
     setBarBpmOverride: (grooveId, barIndex, bpm) => {
@@ -262,9 +363,9 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           }
           return { ...g, bars, updatedAt: Date.now() }
         })
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
     },
 
     setGrooveTimeSignature: (grooveId, timeSignature) => {
@@ -274,9 +375,9 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           defaultTimeSignature: timeSignature,
           updatedAt: Date.now(),
         }))
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
     },
 
     setBarTimeSignature: (grooveId, barIndex, timeSignature) => {
@@ -291,9 +392,9 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           }
           return { ...g, bars, updatedAt: Date.now() }
         })
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
     },
 
     copyBarsToClipboard: (grooveId, fromIndex, toIndex) => {
@@ -307,17 +408,12 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
         .map((b) => cloneBarWithNewIds(b))
       if (clipboardBars.length === 0) return
       set({ clipboardBars })
-      saveToStorage(
-        get().grooves,
-        get().noteDisplayMode,
-        get().playbackVolume,
-        clipboardBars,
-      )
+      persistSettingsOnly()
     },
 
     clearClipboard: () => {
       set({ clipboardBars: [] })
-      saveToStorage(get().grooves, get().noteDisplayMode, get().playbackVolume, [])
+      persistSettingsOnly()
     },
 
     duplicateBarsAt: (grooveId, fromIndex, toIndex) => {
@@ -336,9 +432,9 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           bars.splice(newIndex, 0, ...insertions)
           return { ...g, bars, updatedAt: Date.now() }
         })
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
       return newIndex
     },
 
@@ -359,9 +455,9 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           bars.splice(finalLo, safeRemove)
           return { ...g, bars, updatedAt: Date.now() }
         })
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
       return Math.max(0, finalLo - 1)
     },
 
@@ -376,9 +472,9 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           next.splice(newIndex, 0, ...insertions)
           return { ...g, bars: next, updatedAt: Date.now() }
         })
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
       return newIndex
     },
 
@@ -396,9 +492,9 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           next.splice(lo, removalCount, ...insertions)
           return { ...g, bars: next, updatedAt: Date.now() }
         })
-        persist(grooves)
         return { grooves }
       })
+      markDirty(grooveId)
       return lo
     },
 

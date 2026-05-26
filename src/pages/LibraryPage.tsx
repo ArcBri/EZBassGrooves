@@ -21,6 +21,7 @@ export function LibraryPage({ onOpenGroove }: LibraryPageProps) {
   const toggleFavorite = useGroovesStore((s) => s.toggleFavorite)
   const setTags = useGroovesStore((s) => s.setTags)
   const allTags = useGroovesStore((s) => s.allTags)
+  const dirtyGrooveIds = useGroovesStore((s) => s.dirtyGrooveIds)
   const startTutorial = useTutorialStore((s) => s.start)
   const tutorialNotify = useTutorialStore((s) => s.notify)
 
@@ -205,6 +206,7 @@ export function LibraryPage({ onOpenGroove }: LibraryPageProps) {
           <GrooveRow
             key={g.id}
             groove={g}
+            isDirty={!!dirtyGrooveIds[g.id]}
             formatDate={formatDate}
             menuOpen={menuId === g.id}
             renaming={renamingId === g.id}
@@ -254,6 +256,7 @@ export function LibraryPage({ onOpenGroove }: LibraryPageProps) {
 
 function GrooveRow({
   groove: g,
+  isDirty,
   formatDate,
   menuOpen,
   renaming,
@@ -270,6 +273,7 @@ function GrooveRow({
   onDelete,
 }: {
   groove: Groove
+  isDirty: boolean
   formatDate: (ts: number) => string
   menuOpen: boolean
   renaming: boolean
@@ -321,7 +325,14 @@ function GrooveRow({
             onClick={onOpen}
           >
             <div className="min-w-0">
-              <div className="truncate font-semibold text-slate-900">{g.name}</div>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="truncate font-semibold text-slate-900">{g.name}</span>
+                {isDirty && (
+                  <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                    Unsaved
+                  </span>
+                )}
+              </div>
               <div className="text-xs text-slate-500">
                 {g.bars.length} bar{g.bars.length !== 1 ? 's' : ''} · {formatDate(g.updatedAt)}
                 {g.bpm != null && ` · ${g.bpm} BPM`}

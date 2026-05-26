@@ -22,6 +22,7 @@ export function ScaleKeypad({
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-2" onClick={onClose}>
       <div
+        data-tutorial="bar-keypad"
         className="w-full max-w-md rounded-2xl bg-amber-50 p-3 shadow-xl border border-amber-200"
         onClick={(e) => e.stopPropagation()}
       >

@@ -182,8 +182,9 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
         slots: [...bar.slots, slot],
       }))
       setSelectedSlotIndex(draft.slots.length)
+      tutorialNotify('bar:slotAdded')
     },
-    [draft, updateDraft],
+    [draft, updateDraft, tutorialNotify],
   )
 
   const setNoteAtCell = useCallback(
@@ -532,6 +533,7 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
                 ? (slotIndex, string) => {
                     setSelectedSlotIndex(slotIndex)
                     setCellTarget({ slotIndex, string })
+                    tutorialNotify('bar:cellSelected')
                   }
                 : undefined
             }
@@ -612,7 +614,7 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
               </button>
             </div>
 
-            <div className="flex flex-wrap justify-center gap-1.5">
+            <div data-tutorial="bar-duration" className="flex flex-wrap justify-center gap-1.5">
               {DURATION_ORDER.map((d) => (
                 <button
                   key={d}
@@ -691,7 +693,7 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
               data-tutorial="bar-save"
               className="min-h-[48px] flex-1 rounded-xl bg-slate-900 text-sm font-semibold text-white"
             >
-              Save
+              Apply
             </button>
           </footer>
         </>

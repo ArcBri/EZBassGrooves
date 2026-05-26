@@ -43,6 +43,9 @@ export function MainView({ grooveId, onBack, onOpenBar }: MainViewProps) {
   const deleteBarsAt = useGroovesStore((s) => s.deleteBarsAt)
   const insertBarsAfter = useGroovesStore((s) => s.insertBarsAfter)
   const replaceBarsWith = useGroovesStore((s) => s.replaceBarsWith)
+  const saveGroove = useGroovesStore((s) => s.saveGroove)
+  const discardGrooveChanges = useGroovesStore((s) => s.discardGrooveChanges)
+  const isDirty = useGroovesStore((s) => Boolean(s.dirtyGrooveIds[grooveId]))
   const tutorialNotify = useTutorialStore((s) => s.notify)
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState('')
@@ -254,6 +257,24 @@ export function MainView({ grooveId, onBack, onOpenBar }: MainViewProps) {
     }
   }
 
+  const handleSaveGroove = () => {
+    saveGroove(grooveId)
+    tutorialNotify('groove:saved')
+  }
+
+  const handleDiscardGroove = () => {
+    if (!isDirty) return
+    if (!confirm('Discard unsaved changes to this groove?')) return
+    stop()
+    discardGrooveChanges(grooveId)
+    // If the groove was never persisted (brand-new empty groove), discarding
+    // removes it entirely; bounce back to the library.
+    const stillExists = useGroovesStore
+      .getState()
+      .grooves.some((g) => g.id === grooveId)
+    if (!stillExists) onBack()
+  }
+
   const handleSaveTimeSignature = (timeSignature: TimeSignature) => {
     setGrooveTimeSignature(grooveId, timeSignature)
     const shouldApplyToBars =
@@ -333,7 +354,14 @@ export function MainView({ grooveId, onBack, onOpenBar }: MainViewProps) {
       </header>
 
       <div className="border-b border-slate-100 bg-white px-4 py-1.5 flex items-center justify-between gap-2">
-        <ViewModeChip mode={noteDisplayMode} />
+        <div className="flex items-center gap-2">
+          <ViewModeChip mode={noteDisplayMode} />
+          {isDirty && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+              Unsaved
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {isPlaying && current && (
             <span className="text-xs text-amber-700 font-medium">
@@ -431,6 +459,29 @@ export function MainView({ grooveId, onBack, onOpenBar }: MainViewProps) {
           <span>
             {groove.bars.length} bar{groove.bars.length !== 1 ? 's' : ''}
           </span>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleSaveGroove}
+            data-tutorial="main-save"
+            disabled={!isDirty}
+            className={`min-h-[44px] flex-1 rounded-xl text-sm font-semibold disabled:opacity-40 ${
+              isDirty
+                ? 'bg-blue-600 text-white active:bg-blue-700'
+                : 'bg-slate-100 text-slate-500'
+            }`}
+          >
+            {isDirty ? 'Save groove' : 'Saved'}
+          </button>
+          <button
+            type="button"
+            onClick={handleDiscardGroove}
+            disabled={!isDirty}
+            className="min-h-[44px] rounded-xl border border-slate-300 px-3 text-sm font-medium text-slate-700 disabled:opacity-40"
+          >
+            Discard
+          </button>
         </div>
         <div className="flex gap-2">
           <button
