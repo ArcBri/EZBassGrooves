@@ -27,6 +27,8 @@ type StaffSystemProps = {
   width: number
   onTapBar: (index: number) => void
   onLongPressBar?: (index: number) => void
+  tutorialBarIndex?: number | null
+  tutorialBarToken?: string
   isLastSystem?: boolean
   noteDisplayMode?: NoteDisplayMode
   highlightBarIndex?: number | null
@@ -71,6 +73,8 @@ export function StaffSystem({
   width,
   onTapBar,
   onLongPressBar,
+  tutorialBarIndex = null,
+  tutorialBarToken = 'main-bar',
   isLastSystem,
   noteDisplayMode = 'fret',
   highlightBarIndex = null,
@@ -189,6 +193,7 @@ export function StaffSystem({
               onTap={onTapBar}
               onLongPress={onLongPressBar}
               isSelected={isSelected}
+              tutorialToken={l.index === tutorialBarIndex ? tutorialBarToken : undefined}
             />
 
             {/* Tempo mark above start (only when changed) */}
@@ -492,6 +497,7 @@ function BarTapTarget({
   onTap,
   onLongPress,
   isSelected,
+  tutorialToken,
 }: {
   x: number
   y: number
@@ -501,6 +507,7 @@ function BarTapTarget({
   onTap: (index: number) => void
   onLongPress?: (index: number) => void
   isSelected: boolean
+  tutorialToken?: string
 }) {
   const { handlers, consumeClickIfLongPress } = useLongPress(
     () => onLongPress?.(barIndex),
@@ -524,6 +531,7 @@ function BarTapTarget({
       onPointerUp={handlers.onPointerUp}
       onPointerCancel={handlers.onPointerCancel}
       onPointerLeave={handlers.onPointerLeave}
+      data-tutorial={tutorialToken}
       style={{ cursor: 'pointer', touchAction: 'manipulation' }}
     >
       <title>Bar {barIndex + 1}</title>

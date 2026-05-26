@@ -22,6 +22,7 @@ import {
 } from '../lib/notation'
 import { hasAnyNotes, transposeBar } from '../lib/scale'
 import { useGroovesStore } from '../state/groovesStore'
+import { useTutorialStore } from '../state/tutorialStore'
 import type { Bar, Duration, Slot, StringIndex, TimeSignature } from '../types'
 import { DEFAULT_BPM, DURATION_LABELS, DURATION_ORDER } from '../types'
 
@@ -61,6 +62,7 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
   const insertBarsAfter = useGroovesStore((s) => s.insertBarsAfter)
   const replaceBarsWith = useGroovesStore((s) => s.replaceBarsWith)
   const deleteBarsAt = useGroovesStore((s) => s.deleteBarsAt)
+  const tutorialNotify = useTutorialStore((s) => s.notify)
 
   const savedBar = groove?.bars[barIndex]
 
@@ -119,7 +121,8 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
     setDraft(structuredClone(savedBar))
     setIsEditing(true)
     setSelectedSlotIndex(null)
-  }, [savedBar])
+    tutorialNotify('bar:edit')
+  }, [savedBar, tutorialNotify])
 
   const cancelEdit = useCallback(() => {
     setDraft(null)
@@ -131,11 +134,12 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
   const saveEdit = useCallback(() => {
     if (!draft) return
     commitBar(grooveId, barIndex, draft)
+    tutorialNotify('bar:saved')
     setIsEditing(false)
     setDraft(null)
     setSelectedSlotIndex(null)
     setCellTarget(null)
-  }, [draft, commitBar, grooveId, barIndex])
+  }, [draft, commitBar, grooveId, barIndex, tutorialNotify])
 
   const handleBack = useCallback(() => {
     if (isEditing) {
@@ -184,6 +188,8 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
 
   const setNoteAtCell = useCallback(
     (slotIndex: number, string: StringIndex, fret: number | 'X') => {
+      const slotBefore = draft?.slots[slotIndex]
+      const hadAnyNotes = (slotBefore?.notes.length ?? 0) > 0
       updateDraft((bar) => {
         const slots = bar.slots.map((s, i) => {
           if (i !== slotIndex) return s
@@ -192,8 +198,9 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
         })
         return { ...bar, slots }
       })
+      if (!hadAnyNotes) tutorialNotify('bar:noteAdded')
     },
-    [updateDraft],
+    [draft, updateDraft, tutorialNotify],
   )
 
   const clearNoteAtCell = useCallback(
@@ -459,6 +466,7 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
             <button
               type="button"
               onClick={startEdit}
+              data-tutorial="bar-edit"
               className="min-h-[44px] rounded-lg bg-slate-900 px-3 text-sm font-semibold text-white ml-1"
             >
               Edit
@@ -507,6 +515,7 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
 
         <div
           ref={containerRef}
+          data-tutorial="bar-staff"
           className={`flex-1 overflow-x-auto overflow-y-auto flex items-center justify-center p-4 ${staffBgClass} ${!isEditing ? 'px-10' : ''}`}
         >
           <BarEditor
@@ -679,6 +688,7 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
             <button
               type="button"
               onClick={saveEdit}
+              data-tutorial="bar-save"
               className="min-h-[48px] flex-1 rounded-xl bg-slate-900 text-sm font-semibold text-white"
             >
               Save

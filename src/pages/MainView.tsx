@@ -14,6 +14,7 @@ import {
 } from '../lib/notation'
 import type { PlayBar } from '../lib/metronome'
 import { useGroovesStore } from '../state/groovesStore'
+import { useTutorialStore } from '../state/tutorialStore'
 import { DEFAULT_BPM, type TimeSignature } from '../types'
 
 type MainViewProps = {
@@ -42,6 +43,7 @@ export function MainView({ grooveId, onBack, onOpenBar }: MainViewProps) {
   const deleteBarsAt = useGroovesStore((s) => s.deleteBarsAt)
   const insertBarsAfter = useGroovesStore((s) => s.insertBarsAfter)
   const replaceBarsWith = useGroovesStore((s) => s.replaceBarsWith)
+  const tutorialNotify = useTutorialStore((s) => s.notify)
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState('')
   const [showBpmPicker, setShowBpmPicker] = useState(false)
@@ -248,6 +250,7 @@ export function MainView({ grooveId, onBack, onOpenBar }: MainViewProps) {
       stop()
     } else {
       play(playPlan, 0)
+      tutorialNotify('playback:started')
     }
   }
 
@@ -372,6 +375,8 @@ export function MainView({ grooveId, onBack, onOpenBar }: MainViewProps) {
                 width={containerWidth - 24}
                 onTapBar={handleTapBar}
                 onLongPressBar={handleLongPressBar}
+                tutorialBarIndex={0}
+                tutorialBarToken="main-bar"
                 isLastSystem={sysIdx === systems.length - 1}
                 noteDisplayMode={noteDisplayMode}
                 highlightBarIndex={current?.barIndex ?? null}
@@ -431,6 +436,7 @@ export function MainView({ grooveId, onBack, onOpenBar }: MainViewProps) {
           <button
             type="button"
             onClick={handlePlay}
+            data-tutorial="main-play"
             disabled={groove.bars.length === 0}
             className={`min-h-[48px] flex-1 rounded-xl text-sm font-semibold text-white disabled:opacity-40 ${
               isPlaying ? 'bg-red-600 active:bg-red-700' : 'bg-emerald-600 active:bg-emerald-700'

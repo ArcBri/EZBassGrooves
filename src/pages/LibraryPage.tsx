@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { TagEditor } from '../components/TagEditor'
 import { exportGrooveToFile, importGrooveFromFile } from '../lib/storage'
 import { useGroovesStore } from '../state/groovesStore'
+import { useTutorialStore } from '../state/tutorialStore'
 import type { Groove } from '../types'
 
 type LibraryPageProps = {
@@ -20,6 +21,8 @@ export function LibraryPage({ onOpenGroove }: LibraryPageProps) {
   const toggleFavorite = useGroovesStore((s) => s.toggleFavorite)
   const setTags = useGroovesStore((s) => s.setTags)
   const allTags = useGroovesStore((s) => s.allTags)
+  const startTutorial = useTutorialStore((s) => s.start)
+  const tutorialNotify = useTutorialStore((s) => s.notify)
 
   const fileRef = useRef<HTMLInputElement>(null)
   const [menuId, setMenuId] = useState<string | null>(null)
@@ -73,6 +76,7 @@ export function LibraryPage({ onOpenGroove }: LibraryPageProps) {
 
   const handleNew = () => {
     const g = createGroove()
+    tutorialNotify('grooves:added')
     onOpenGroove(g.id)
   }
 
@@ -96,7 +100,17 @@ export function LibraryPage({ onOpenGroove }: LibraryPageProps) {
   return (
     <div className="flex h-full flex-col bg-slate-50">
       <header className="border-b border-slate-200 bg-white px-4 py-4 pt-[max(1rem,env(safe-area-inset-top))]">
-        <h1 className="text-xl font-bold text-slate-900">EZBassGrooves</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-slate-900">EZBassGrooves</h1>
+          <button
+            type="button"
+            onClick={startTutorial}
+            className="min-h-[36px] min-w-[36px] rounded-lg bg-slate-100 text-sm font-semibold text-slate-700"
+            aria-label="Open tutorial"
+          >
+            ?
+          </button>
+        </div>
         <p className="text-sm text-slate-500">Bass grooves & riffs, made easy</p>
       </header>
 
@@ -149,6 +163,7 @@ export function LibraryPage({ onOpenGroove }: LibraryPageProps) {
           <button
             type="button"
             onClick={handleNew}
+            data-tutorial="new-groove"
             className="min-h-[44px] flex-1 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white active:bg-slate-700"
           >
             + New groove
