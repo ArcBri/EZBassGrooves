@@ -52,7 +52,6 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
   const setBpm = useGroovesStore((s) => s.setBpm)
   const setBarBpmOverride = useGroovesStore((s) => s.setBarBpmOverride)
   const setGrooveTimeSignature = useGroovesStore((s) => s.setGrooveTimeSignature)
-  const setBarTimeSignature = useGroovesStore((s) => s.setBarTimeSignature)
   const playbackVolume = useGroovesStore((s) => s.playbackVolume)
   const setPlaybackVolume = useGroovesStore((s) => s.setPlaybackVolume)
   const clipboardBars = useGroovesStore((s) => s.clipboardBars)
@@ -189,8 +188,6 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
 
   const setNoteAtCell = useCallback(
     (slotIndex: number, string: StringIndex, fret: number | 'X') => {
-      const slotBefore = draft?.slots[slotIndex]
-      const hadAnyNotes = (slotBefore?.notes.length ?? 0) > 0
       updateDraft((bar) => {
         const slots = bar.slots.map((s, i) => {
           if (i !== slotIndex) return s
@@ -199,9 +196,9 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
         })
         return { ...bar, slots }
       })
-      if (!hadAnyNotes) tutorialNotify('bar:noteAdded')
+      tutorialNotify('bar:noteAdded')
     },
-    [draft, updateDraft, tutorialNotify],
+    [updateDraft, tutorialNotify],
   )
 
   const clearNoteAtCell = useCallback(
@@ -325,19 +322,42 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
 
   const handleSaveTimeSignature = useCallback(
     (timeSignature: TimeSignature, override: boolean) => {
-      if (isEditing && draft) {
-        const nextBar = applyTimeSignatureToBar(draft, timeSignature)
-        if (!nextBar) return
-        setDraft(nextBar)
-        setSelectedSlotIndex(null)
-        if (!override) setGrooveTimeSignature(grooveId, timeSignature)
-      } else if (savedBar) {
-        const nextBar = applyTimeSignatureToBar(savedBar, timeSignature)
-        if (!nextBar) return
-        if (!override) setGrooveTimeSignature(grooveId, timeSignature)
-        setBarTimeSignature(grooveId, barIndex, nextBar.timeSignature)
-        if (nextBar.slots.length !== savedBar.slots.length) {
+      if (!groove) return
+
+      if (override) {
+        if (isEditing && draft) {
+          const nextBar = applyTimeSignatureToBar(draft, timeSignature)
+          if (!nextBar) return
+          setDraft(nextBar)
+          setSelectedSlotIndex(null)
+        } else if (savedBar) {
+          const nextBar = applyTimeSignatureToBar(savedBar, timeSignature)
+          if (!nextBar) return
           commitBar(grooveId, barIndex, nextBar)
+        }
+      } else {
+        setGrooveTimeSignature(grooveId, timeSignature)
+        const shouldApplyToBars =
+          groove.bars.length > 0 &&
+          confirm('Apply this time signature to all existing bars? Bars with too many slots will be trimmed.')
+
+        if (shouldApplyToBars) {
+          const maxBeats = timeSignatureTotalBeats(timeSignature)
+          groove.bars.forEach((bar, index) => {
+            if (isEditing && draft && index === barIndex) {
+              setDraft({
+                ...draft,
+                timeSignature,
+                slots: trimSlotsToFit(draft.slots, maxBeats),
+              })
+              setSelectedSlotIndex(null)
+            }
+            commitBar(grooveId, index, {
+              ...bar,
+              timeSignature,
+              slots: trimSlotsToFit(bar.slots, maxBeats),
+            })
+          })
         }
       }
 
@@ -348,11 +368,10 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
       barIndex,
       commitBar,
       draft,
+      groove,
       grooveId,
-      grooveTimeSignature,
       isEditing,
       savedBar,
-      setBarTimeSignature,
       setGrooveTimeSignature,
     ],
   )
@@ -572,7 +591,7 @@ export function BarView({ grooveId, barIndex, onBack, onNavigateBar }: BarViewPr
             type="button"
             onClick={() => {
               if (isPlaying) stop()
-              else play(barPlayPlan, barIndex)
+              else play(barPlayPlan, 0)
             }}
             disabled={!displayBar || displayBar.slots.length === 0}
             className={`w-full min-h-[48px] rounded-xl text-sm font-semibold text-white disabled:opacity-40 ${

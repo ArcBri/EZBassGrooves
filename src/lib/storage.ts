@@ -47,7 +47,7 @@ export function saveToStorage(
   noteDisplayMode: NoteDisplayMode = 'fret',
   playbackVolume?: PlaybackVolume,
   clipboardBars?: Bar[] | null,
-): void {
+): boolean {
   const state: PersistedState = {
     version: 1,
     grooves,
@@ -55,7 +55,13 @@ export function saveToStorage(
     ...(playbackVolume ? { playbackVolume } : {}),
     ...(clipboardBars && clipboardBars.length > 0 ? { clipboardBars } : {}),
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    return true
+  } catch (err) {
+    console.warn('Failed to persist app state', err)
+    return false
+  }
 }
 
 export function exportGrooveToFile(groove: Groove): void {

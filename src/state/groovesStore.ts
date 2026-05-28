@@ -2,7 +2,13 @@ import { create } from 'zustand'
 import type { Bar, Groove, PlaybackVolume, TimeSignature } from '../types'
 import { DEFAULT_PLAYBACK_VOLUME } from '../types'
 import { createId } from '../lib/ids'
-import { cloneBarWithNewIds, createEmptyBar, normalizeTags } from '../lib/notation'
+import {
+  cloneBarWithNewIds,
+  createEmptyBar,
+  normalizeTags,
+  timeSignatureTotalBeats,
+  trimSlotsToFit,
+} from '../lib/notation'
 import type { NoteDisplayMode } from '../lib/scale'
 import { loadFromStorage, saveToStorage } from '../lib/storage'
 
@@ -59,9 +65,17 @@ function clampVolume(v: number): number {
   return Math.min(1, Math.max(0, v))
 }
 
+function freshenBarIds(bars: Bar[]): Bar[] {
+  return bars.map((bar) => ({
+    ...bar,
+    id: createId(),
+    slots: bar.slots.map((slot) => ({ ...slot, id: createId() })),
+  }))
+}
+
 export const useGroovesStore = create<GroovesState>((set, get) => {
   const persist = (grooves: Groove[]) => {
-    saveToStorage(
+    return saveToStorage(
       grooves,
       get().noteDisplayMode,
       get().playbackVolume,
@@ -88,7 +102,7 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
   const persistSettingsOnly = () => {
     const stored = loadFromStorage()
     const persistedGrooves = stored?.grooves ?? []
-    saveToStorage(
+    return saveToStorage(
       persistedGrooves,
       get().noteDisplayMode,
       get().playbackVolume,
@@ -103,7 +117,7 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
     const stored = loadFromStorage()
     const persistedGrooves = stored?.grooves ?? []
     const updated = mutator(persistedGrooves)
-    saveToStorage(
+    return saveToStorage(
       updated,
       get().noteDisplayMode,
       get().playbackVolume,
@@ -144,19 +158,19 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
     saveGroove: (grooveId) => {
       const inMemory = get().grooves.find((g) => g.id === grooveId)
       if (!inMemory) return
-      updateOnDisk((g) => {
+      const saved = updateOnDisk((g) => {
         const idx = g.findIndex((x) => x.id === grooveId)
         if (idx < 0) return [...g, inMemory]
         const next = [...g]
         next[idx] = inMemory
         return next
       })
-      clearDirty(grooveId)
+      if (saved) clearDirty(grooveId)
     },
 
     saveAllGrooves: () => {
-      persist(get().grooves)
-      set({ dirtyGrooveIds: {} })
+      const saved = persist(get().grooves)
+      if (saved) set({ dirtyGrooveIds: {} })
     },
 
     discardGrooveChanges: (grooveId) => {
@@ -248,6 +262,7 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
         createdAt: now,
         updatedAt: now,
       }
+      copy.bars = freshenBarIds(copy.bars)
       set((s) => ({ grooves: [...s.grooves, copy] }))
       updateOnDisk((g) => [...g, copy])
       return copy
@@ -261,6 +276,7 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
         updatedAt: now,
         createdAt: groove.createdAt ?? now,
       }
+      imported.bars = freshenBarIds(imported.bars)
       set((s) => ({ grooves: [...s.grooves, imported] }))
       updateOnDisk((g) => [...g, imported])
     },
@@ -386,9 +402,11 @@ export const useGroovesStore = create<GroovesState>((set, get) => {
           const bars = [...g.bars]
           const bar = bars[barIndex]
           if (!bar) return g
+          const maxBeats = timeSignatureTotalBeats(timeSignature)
           bars[barIndex] = {
             ...bar,
             timeSignature,
+            slots: trimSlotsToFit(bar.slots, maxBeats),
           }
           return { ...g, bars, updatedAt: Date.now() }
         })

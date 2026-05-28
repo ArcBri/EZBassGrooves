@@ -21,6 +21,13 @@ type ScheduledEvent =
   | { kind: 'note'; time: number; midi: number; duration: number }
   | { kind: 'end'; time: number }
 
+const KIND_RANK: Record<ScheduledEvent['kind'], number> = {
+  click: 0,
+  note: 1,
+  slot: 2,
+  end: 3,
+}
+
 function noteKey(slotIndex: number, string: StringIndex, fret: number): string {
   return `${slotIndex}:${string}:${fret}`
 }
@@ -87,7 +94,7 @@ function buildSchedule(bars: PlayBar[], startBarIndex = 0): ScheduledEvent[] {
 
   events.push({ kind: 'end', time })
 
-  events.sort((a, b) => a.time - b.time)
+  events.sort((a, b) => a.time - b.time || KIND_RANK[a.kind] - KIND_RANK[b.kind])
   return events
 }
 
@@ -281,6 +288,7 @@ export class Metronome {
     if (this.stopped) return
     this.stopped = true
     this.clearTimers()
+    this.cleanupAudio()
     this.onTick({ barIndex: -1, slotIndex: -1, isBeat: false })
     this.onStop()
   }
@@ -294,9 +302,7 @@ export class Metronome {
     this.timeoutIds = []
   }
 
-  stop() {
-    this.stopped = true
-    this.clearTimers()
+  private cleanupAudio() {
     // The AudioContext is shared across plays so we don't close it here -
     // closing destroys the iOS unlock and forces re-priming on the next play.
     // Disconnect the gain chain instead to silence any in-flight audio
@@ -312,6 +318,12 @@ export class Metronome {
     this.masterGain = null
     this.clickGain = null
     this.synthGain = null
+  }
+
+  stop() {
+    this.stopped = true
+    this.clearTimers()
+    this.cleanupAudio()
     this.events = []
     this.nextIndex = 0
   }
