@@ -1,4 +1,5 @@
 import type { Bar, StringIndex } from '../types'
+import { getAudioContext, unlockAudio } from './audioContext'
 import { barDurationSeconds, durationToBeats } from './notation'
 import { fretToMidi } from './scale'
 
@@ -180,8 +181,24 @@ export class Metronome {
   }): Promise<void> {
     this.stop()
     this.stopped = false
-    this.ctx = new AudioContext()
-    await this.ctx.resume()
+
+    // Unlock + grab the shared AudioContext. Doing this synchronously (no
+    // await before it) keeps us inside the user-gesture frame on iOS so the
+    // context can actually start producing sound.
+    unlockAudio()
+    const ctx = getAudioContext()
+    if (!ctx) {
+      this.onStop()
+      return
+    }
+    this.ctx = ctx
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume()
+      } catch {
+        // ignore; iOS will unlock once a user gesture lands
+      }
+    }
 
     this.volume = {
       click: plan.volume?.click ?? this.volume.click,
@@ -280,10 +297,18 @@ export class Metronome {
   stop() {
     this.stopped = true
     this.clearTimers()
-    if (this.ctx) {
-      void this.ctx.close()
-      this.ctx = null
+    // The AudioContext is shared across plays so we don't close it here -
+    // closing destroys the iOS unlock and forces re-priming on the next play.
+    // Disconnect the gain chain instead to silence any in-flight audio
+    // immediately.
+    try {
+      this.masterGain?.disconnect()
+      this.clickGain?.disconnect()
+      this.synthGain?.disconnect()
+    } catch {
+      // ignore - already disconnected or context closed
     }
+    this.ctx = null
     this.masterGain = null
     this.clickGain = null
     this.synthGain = null

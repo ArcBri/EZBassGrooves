@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { unlockAudio } from '../lib/audioContext'
 import { Metronome, type PlayBar } from '../lib/metronome'
 import { useGroovesStore } from '../state/groovesStore'
 
@@ -32,6 +33,9 @@ export function usePlayhead() {
 
   const play = useCallback(
     (bars: PlayBar[], startBarIndex = 0) => {
+      // Must run synchronously inside the user's tap gesture so iOS will
+      // actually unlock and start outputting audio.
+      unlockAudio()
       stop()
       const metro = new Metronome({
         onTick: (t) => {
