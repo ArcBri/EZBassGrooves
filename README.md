@@ -72,3 +72,74 @@ Then extend the workflow with `apple-actions/import-codesign-certs`, `xcodebuild
 ```bash
 npm run ios:open
 ```
+
+## Android app (Capacitor)
+
+The web app is wrapped as a native Android shell via [Capacitor](https://capacitorjs.com/).
+
+- **Application ID:** `com.arcb.ezbassgrooves`
+- **App name:** EZBassGrooves
+
+### Develop on Windows
+
+After changing the React app:
+
+```bash
+npm run android:sync
+```
+
+This builds `dist/` and copies it into the Android Studio project. Commit and push; GitHub Actions builds a debug `.apk` on every push to `main`.
+
+Open the project in Android Studio:
+
+```bash
+npm run android:open
+```
+
+### Regenerate launcher icons and splash
+
+Source logo: [`assets/logo.svg`](assets/logo.svg) (copied from [`public/favicon.svg`](public/favicon.svg)).
+
+```bash
+npx @capacitor/assets generate --android --iconBackgroundColor '#0f172a' --iconBackgroundColorDark '#0f172a' --splashBackgroundColor '#0f172a' --splashBackgroundColorDark '#0f172a'
+```
+
+### Download a build from CI
+
+1. Open the repo on GitHub → **Actions** → **Android Build**.
+2. Open the latest successful run → download **EZBassGrooves-debug-apk** (installable on any device with USB debugging enabled).
+
+When signing secrets are configured, the same workflow also produces **EZBassGrooves-release-aab** for Google Play upload.
+
+### Publish to Google Play
+
+You need:
+
+1. [Google Play Developer account](https://play.google.com/console/signup) ($25 one-time).
+2. An app in Play Console with package name `com.arcb.ezbassgrooves`.
+3. A release keystore (keep the `.jks` out of git):
+
+   ```bash
+   keytool -genkey -v -keystore ezbassgrooves-release.jks -alias ezbassgrooves -keyalg RSA -keysize 2048 -validity 10000
+   ```
+
+4. GitHub repository secrets for signing:
+
+   - `ANDROID_KEYSTORE_BASE64` — base64-encoded keystore file
+   - `ANDROID_KEYSTORE_PASSWORD`
+   - `ANDROID_KEY_ALIAS` — e.g. `ezbassgrooves`
+   - `ANDROID_KEY_PASSWORD`
+
+   Encode the keystore for the secret:
+
+   ```bash
+   # Linux / macOS / Git Bash
+   base64 -w 0 ezbassgrooves-release.jks
+
+   # PowerShell
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("ezbassgrooves-release.jks"))
+   ```
+
+5. Push to `main` → download **EZBassGrooves-release-aab** from Actions → upload to Play Console (Internal testing → Closed → Production).
+
+Play Store listing assets (screenshots, feature graphic, descriptions) are uploaded directly in the Play Console.

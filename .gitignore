@@ -29,3 +29,13 @@ ios/App/App/public/
 ios/DerivedData/
 ios/.build/
 *.xcuserstate
+
+# Capacitor / Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/public/
+android/local.properties
+android/captures/
+*.keystore
+*.jks
