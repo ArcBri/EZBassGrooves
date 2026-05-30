@@ -1,6 +1,11 @@
 import { useMemo, useRef, useState } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { TagEditor } from '../components/TagEditor'
-import { exportGrooveToFile, importGrooveFromFile } from '../lib/storage'
+import {
+  exportGrooveToFile,
+  importGrooveFromFile,
+  pickAndImportGroove,
+} from '../lib/storage'
 import { useGroovesStore } from '../state/groovesStore'
 import { useTutorialStore } from '../state/tutorialStore'
 import type { Groove } from '../types'
@@ -90,6 +95,41 @@ export function LibraryPage({ onOpenGroove }: LibraryPageProps) {
     }
   }
 
+  const handleImportClick = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const groove = await pickAndImportGroove()
+        if (groove) {
+          importGroove(groove)
+        } else {
+          alert('Could not import file. Expected an EZBassGrooves JSON export.')
+        }
+      } catch (err) {
+        const cancelled =
+          err instanceof Error && /cancel/i.test(err.message)
+        if (!cancelled) {
+          console.warn('Native file picker failed', err)
+          alert('Could not open file picker.')
+        }
+      }
+      return
+    }
+    fileRef.current?.click()
+  }
+
+  const handleExport = async (groove: Groove) => {
+    try {
+      await exportGrooveToFile(groove)
+    } catch (err) {
+      const cancelled =
+        err instanceof Error && /cancel/i.test(err.message)
+      if (!cancelled) {
+        console.warn('Export failed', err)
+        alert('Could not export groove.')
+      }
+    }
+  }
+
   const formatDate = (ts: number) =>
     new Date(ts).toLocaleDateString(undefined, {
       month: 'short',
@@ -171,7 +211,7 @@ export function LibraryPage({ onOpenGroove }: LibraryPageProps) {
           </button>
           <button
             type="button"
-            onClick={() => fileRef.current?.click()}
+            onClick={() => void handleImportClick()}
             className="min-h-[44px] rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 active:bg-slate-50"
           >
             Import
@@ -232,7 +272,7 @@ export function LibraryPage({ onOpenGroove }: LibraryPageProps) {
               duplicateGroove(g.id)
               setMenuId(null)
             }}
-            onExport={() => exportGrooveToFile(g)}
+            onExport={() => void handleExport(g)}
             onDelete={() => {
               if (confirm(`Delete "${g.name}"?`)) deleteGroove(g.id)
               setMenuId(null)

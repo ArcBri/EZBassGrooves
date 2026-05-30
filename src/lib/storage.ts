@@ -1,3 +1,7 @@
+import { Capacitor } from '@capacitor/core'
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem'
+import { Share } from '@capacitor/share'
+import { FilePicker } from '@capawesome/capacitor-file-picker'
 import type { Bar, Groove, PlaybackVolume } from '../types'
 import type { NoteDisplayMode } from './scale'
 
@@ -64,21 +68,16 @@ export function saveToStorage(
   }
 }
 
-export function exportGrooveToFile(groove: Groove): void {
-  const blob = new Blob([JSON.stringify({ version: 1, groove }, null, 2)], {
-    type: 'application/json',
-  })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${groove.name.replace(/[^\w\-]+/g, '_') || 'groove'}.json`
-  a.click()
-  URL.revokeObjectURL(url)
+function grooveFileName(groove: Groove): string {
+  return `${groove.name.replace(/[^\w\-]+/g, '_') || 'groove'}.json`
 }
 
-export async function importGrooveFromFile(file: File): Promise<Groove | null> {
+function grooveJson(groove: Groove): string {
+  return JSON.stringify({ version: 1, groove }, null, 2)
+}
+
+function parseGrooveJson(text: string): Groove | null {
   try {
-    const text = await file.text()
     const data = JSON.parse(text) as { version?: number; groove?: Groove }
     if (data.groove?.id && data.groove.name && Array.isArray(data.groove.bars)) {
       return data.groove
@@ -91,4 +90,74 @@ export async function importGrooveFromFile(file: File): Promise<Groove | null> {
   } catch {
     return null
   }
+}
+
+export async function exportGrooveToFile(groove: Groove): Promise<void> {
+  const json = grooveJson(groove)
+  const fileName = grooveFileName(groove)
+
+  if (Capacitor.isNativePlatform()) {
+    const path = `EZBassGrooves/${fileName}`
+    await Filesystem.writeFile({
+      path,
+      data: json,
+      directory: Directory.Documents,
+      encoding: Encoding.UTF8,
+      recursive: true,
+    })
+    const { uri } = await Filesystem.getUri({
+      path,
+      directory: Directory.Documents,
+    })
+    await Share.share({
+      title: groove.name,
+      url: uri,
+      dialogTitle: 'Saved to Documents/EZBassGrooves. Share groove?',
+    })
+    return
+  }
+
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function importGrooveFromFile(file: File): Promise<Groove | null> {
+  const text = await file.text()
+  return parseGrooveJson(text)
+}
+
+export async function pickAndImportGroove(): Promise<Groove | null> {
+  if (!Capacitor.isNativePlatform()) return null
+
+  const result = await FilePicker.pickFiles({
+    types: ['application/json'],
+    readData: true,
+    limit: 1,
+  })
+  const picked = result.files[0]
+  if (!picked) return null
+
+  let text: string | null = null
+  if (picked.data) {
+    try {
+      text = atob(picked.data)
+    } catch {
+      text = null
+    }
+  }
+  if (text == null && picked.path) {
+    const read = await Filesystem.readFile({
+      path: picked.path,
+      encoding: Encoding.UTF8,
+    })
+    text = typeof read.data === 'string' ? read.data : await read.data.text()
+  }
+  if (text == null) return null
+
+  return parseGrooveJson(text)
 }
